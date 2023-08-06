@@ -1,9 +1,9 @@
-[submodule "include/sokol"]
-	path = include/sokol
-	url = https://github.com/floooh/sokol.git
-[submodule "include/flecs"]
-	path = include/flecs
-	url = https://github.com/SanderMertens/flecs.git
 [submodule "3rdparty/Nuklear"]
 	path = 3rdparty/Nuklear
 	url = https://github.com/Immediate-Mode-UI/Nuklear.git
+[submodule "3rdparty/sokol"]
+	path = 3rdparty/sokol
+	url = https://github.com/floooh/sokol.git
+[submodule "3rdparty/flecs"]
+	path = 3rdparty/flecs
+	url = https://github.com/SanderMertens/flecs.git
