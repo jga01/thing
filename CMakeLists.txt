@@ -9,12 +9,13 @@ project(
 file(GLOB SOURCES "src/*.c")
 add_executable(thing ${SOURCES})
 
-set(SOKOL_HEADERS "include/sokol")
-set(HANDMADEMATH_HEADERS "include/HandmadeMath")
+set(SOKOL_HEADERS "3rdparty/sokol")
+set(HANDMADEMATH_HEADERS "3rdparty/HandmadeMath")
+set(NUKLEAR_HEADERS "3rdparty/Nuklear")
 
 target_include_directories(thing PRIVATE include)
-target_include_directories(thing PRIVATE ${SOKOL_HEADERS} ${HANDMADEMATH_HEADERS})
+target_include_directories(thing PRIVATE ${SOKOL_HEADERS} ${HANDMADEMATH_HEADERS} ${NUKLEAR_HEADERS})
 
-add_subdirectory(include/flecs)
+add_subdirectory(3rdparty/flecs)
 
 target_link_libraries(thing PRIVATE flecs)
