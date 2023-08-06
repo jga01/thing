@@ -14,7 +14,6 @@ set(SOKOL_HEADERS "include/sokol")
 target_include_directories(thing PRIVATE include)
 target_include_directories(thing PRIVATE ${SOKOL_HEADERS})
 
-
 add_subdirectory(include/flecs)
 
 target_link_libraries(thing PRIVATE flecs)
