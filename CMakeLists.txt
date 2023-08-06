@@ -6,8 +6,15 @@ project(
     LANGUAGES C    
 )
 
-include_directories(include)
-
 file(GLOB SOURCES "src/*.c")
-
 add_executable(thing ${SOURCES})
+
+set(SOKOL_HEADERS "include/sokol")
+
+target_include_directories(thing PRIVATE include)
+target_include_directories(thing PRIVATE ${SOKOL_HEADERS})
+
+
+add_subdirectory(include/flecs)
+
+target_link_libraries(thing PRIVATE flecs)

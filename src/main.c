@@ -1,5 +1,7 @@
 #include <stdio.h>
-#include <stdint.h>
+
+#include "sokol/sokol_gfx.h"
+#include "flecs/flecs.h"
 
 int main(void)
 {

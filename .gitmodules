@@ -1,0 +1,6 @@
+[submodule "include/sokol"]
+	path = include/sokol
+	url = https://github.com/floooh/sokol.git
+[submodule "include/flecs"]
+	path = include/flecs
+	url = https://github.com/SanderMertens/flecs.git
