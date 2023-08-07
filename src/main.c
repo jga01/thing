@@ -1,270 +1,190 @@
-#define HANDMADE_MATH_IMPLEMENTATION
-#define HANDMADE_MATH_NO_SSE
 #define SOKOL_IMPL
 #define SOKOL_GLCORE33
-
 #include "sokol_gfx.h"
+#include "sokol_gp.h"
 #include "sokol_app.h"
-#include "sokol_log.h"
 #include "sokol_glue.h"
 
-#define SOKOL_GL_IMPL
-#include "util/sokol_gl.h"
+#include <stdio.h>
+#include <stdlib.h>
 
-// include nuklear.h before the sokol_nuklear.h implementation
-#define NK_IMPLEMENTATION
-#define NK_INCLUDE_FIXED_TYPES
-#define NK_INCLUDE_STANDARD_IO
-#define NK_INCLUDE_DEFAULT_ALLOCATOR
-#define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
-#define NK_INCLUDE_FONT_BAKING
-#define NK_INCLUDE_DEFAULT_FONT
-#define NK_INCLUDE_STANDARD_VARARGS
-#include "nuklear.h"
-#define SOKOL_NUKLEAR_IMPL
-#include "util/sokol_nuklear.h"
+static sgp_vec2 points_buffer[4096];
+static const float PI = 3.14159265358979323846264338327f;
 
-#define OFFSCREEN_WIDTH (32)
-#define OFFSCREEN_HEIGHT (32)
-#define OFFSCREEN_COLOR_FORMAT (SG_PIXELFORMAT_RGBA8)
-#define OFFSCREEN_DEPTH_FORMAT (SG_PIXELFORMAT_DEPTH)
-#define OFFSCREEN_SAMPLE_COUNT (1)
+static void draw_rects(void) {
+    sgp_irect viewport = sgp_query_state()->viewport;
+    int width = viewport.w, height = viewport.h;
+    int size = 64;
+    int hsize = size / 2;
+    float time = sapp_frame_count() / 60.0f;
+    float t = (1.0f+sinf(time))/2.0f;
 
-static struct
-{
-    double angle_deg;
-    struct
-    {
-        sgl_context sgl_ctx;
-        sgl_pipeline sgl_pip;
-        sg_image color_img;
-        sg_image depth_img;
-        sg_pass pass;
-        sg_pass_action pass_action;
-    } offscreen;
-    struct
-    {
-        sg_pass_action pass_action;
-    } display;
-    struct
-    {
-        snk_image_t img_nearest_clamp;
-        snk_image_t img_linear_clamp;
-        snk_image_t img_nearest_repeat;
-        snk_image_t img_linear_mirror;
-    } ui;
-} state;
+    // left
+    sgp_push_transform();
+    sgp_translate(width*0.25f - hsize, height*0.5f - hsize);
+    sgp_translate(0.0f, 2*size*t - size);
+    sgp_set_color(t, 0.3f, 1.0f-t, 1.0f);
+    sgp_draw_filled_rect(0, 0, size, size);
+    sgp_pop_transform();
 
-static void draw_cube(void);
+    // middle
+    sgp_push_transform();
+    sgp_translate(width*0.5f - hsize, height*0.5f - hsize);
+    sgp_rotate_at(time, hsize, hsize);
+    sgp_set_color(t, 1.0f - t, 0.3f, 1.0f);
+    sgp_draw_filled_rect(0, 0, size, size);
+    sgp_pop_transform();
 
-static void init(void)
-{
-    sg_setup(&(sg_desc){
-        .context = sapp_sgcontext(),
-        .logger.func = slog_func,
-    });
-    snk_setup(&(snk_desc_t){
-        .dpi_scale = sapp_dpi_scale(),
-        .logger.func = slog_func,
-    });
-    sgl_setup(&(sgl_desc_t){
-        .logger.func = slog_func,
-    });
-
-    // a sokol-gl context to render into an offscreen pass
-    state.offscreen.sgl_ctx = sgl_make_context(&(sgl_context_desc_t){
-        .color_format = OFFSCREEN_COLOR_FORMAT,
-        .depth_format = OFFSCREEN_DEPTH_FORMAT,
-        .sample_count = OFFSCREEN_SAMPLE_COUNT,
-    });
-
-    // a sokol-gl pipeline object for 3D rendering
-    state.offscreen.sgl_pip = sgl_context_make_pipeline(state.offscreen.sgl_ctx, &(sg_pipeline_desc){
-                                                                                     .cull_mode = SG_CULLMODE_BACK,
-                                                                                     .depth = {
-                                                                                         .write_enabled = true,
-                                                                                         .pixel_format = OFFSCREEN_DEPTH_FORMAT,
-                                                                                         .compare = SG_COMPAREFUNC_LESS_EQUAL,
-                                                                                     },
-                                                                                     .colors[0].pixel_format = OFFSCREEN_COLOR_FORMAT,
-                                                                                     .sample_count = OFFSCREEN_SAMPLE_COUNT,
-                                                                                 });
-
-    // color and depth render target textures for the offscreen pass
-    state.offscreen.color_img = sg_make_image(&(sg_image_desc){
-        .render_target = true,
-        .width = OFFSCREEN_WIDTH,
-        .height = OFFSCREEN_HEIGHT,
-        .pixel_format = OFFSCREEN_COLOR_FORMAT,
-        .sample_count = OFFSCREEN_SAMPLE_COUNT,
-    });
-    state.offscreen.depth_img = sg_make_image(&(sg_image_desc){
-        .render_target = true,
-        .width = OFFSCREEN_WIDTH,
-        .height = OFFSCREEN_HEIGHT,
-        .pixel_format = OFFSCREEN_DEPTH_FORMAT,
-        .sample_count = OFFSCREEN_SAMPLE_COUNT,
-    });
-
-    // a render pass object to render into the offscreen render targets
-    state.offscreen.pass = sg_make_pass(&(sg_pass_desc){
-        .color_attachments[0].image = state.offscreen.color_img,
-        .depth_stencil_attachment.image = state.offscreen.depth_img,
-    });
-
-    // a pass-action for the offscreen pass which clears to black
-    state.offscreen.pass_action = (sg_pass_action){
-        .colors[0] = {.load_action = SG_LOADACTION_CLEAR, .clear_value = {0.0f, 0.0f, 0.0f, 1.0f}},
-    };
-
-    // a pass action for the default pass which clears to blue-ish
-    state.display.pass_action = (sg_pass_action){
-        .colors[0] = {.load_action = SG_LOADACTION_CLEAR, .clear_value = {0.5f, 0.5f, 1.0f, 1.0f}},
-    };
-
-    // sokol-nuklear image-sampler-pair wrappers which combine the offscreen
-    // render target texture with different sampler types
-    state.ui.img_nearest_clamp = snk_make_image(&(snk_image_desc_t){
-        .image = state.offscreen.color_img,
-        .sampler = sg_make_sampler(&(sg_sampler_desc){
-            .min_filter = SG_FILTER_NEAREST,
-            .mag_filter = SG_FILTER_NEAREST,
-            .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
-            .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
-        })});
-    state.ui.img_linear_clamp = snk_make_image(&(snk_image_desc_t){
-        .image = state.offscreen.color_img,
-        .sampler = sg_make_sampler(&(sg_sampler_desc){
-            .min_filter = SG_FILTER_LINEAR,
-            .mag_filter = SG_FILTER_LINEAR,
-            .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
-            .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
-        })});
-    state.ui.img_nearest_repeat = snk_make_image(&(snk_image_desc_t){
-        .image = state.offscreen.color_img,
-        .sampler = sg_make_sampler(&(sg_sampler_desc){
-            .min_filter = SG_FILTER_NEAREST,
-            .mag_filter = SG_FILTER_NEAREST,
-            .wrap_u = SG_WRAP_REPEAT,
-            .wrap_v = SG_WRAP_REPEAT,
-        })});
-    state.ui.img_linear_mirror = snk_make_image(&(snk_image_desc_t){
-        .image = state.offscreen.color_img,
-        .sampler = sg_make_sampler(&(sg_sampler_desc){
-            .min_filter = SG_FILTER_LINEAR,
-            .mag_filter = SG_FILTER_LINEAR,
-            .wrap_u = SG_WRAP_MIRRORED_REPEAT,
-            .wrap_v = SG_WRAP_MIRRORED_REPEAT,
-        })});
+    // right
+    sgp_push_transform();
+    sgp_translate(width*0.75f - hsize, height*0.5f - hsize);
+    sgp_scale_at(t + 0.25f, t + 0.5f, hsize, hsize);
+    sgp_set_color(0.3f, t, 1.0f - t, 1.0f);
+    sgp_draw_filled_rect(0, 0, size, size);
+    sgp_pop_transform();
 }
 
-static void frame(void)
-{
-    state.angle_deg += sapp_frame_duration() * 60.0;
-    const float a = sgl_rad((float)state.angle_deg);
-
-    // first use sokol-gl to render a rotating cube into the sokol-gl context,
-    // this just records draw command for the later sokol-gfx render pass
-    sgl_set_context(state.offscreen.sgl_ctx);
-    sgl_defaults();
-    sgl_load_pipeline(state.offscreen.sgl_pip);
-    sgl_matrix_mode_projection();
-    sgl_perspective(sgl_rad(45.0f), 1.0f, 0.1f, 100.0f);
-    const float eye[3] = {sinf(a) * 4.0f, sinf(a) * 2.0f, cosf(a) * 4.0f};
-    sgl_matrix_mode_modelview();
-    sgl_lookat(eye[0], eye[1], eye[2], 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);
-    draw_cube();
-
-    // specific the Nuklear UI (this also just records draw commands which
-    // are then rendered later in the frame in the sokol-gfx default pass)
-    struct nk_context *ctx = snk_new_frame();
-    if (nk_begin(ctx, "Sokol + Nuklear Image Test", nk_rect(10, 10, 540, 570), NK_WINDOW_BORDER | NK_WINDOW_SCALABLE | NK_WINDOW_MOVABLE | NK_WINDOW_MINIMIZABLE))
-    {
-        nk_layout_row_static(ctx, 256, 256, 2);
-        const struct nk_rect region = {0, 0, 4, 4};
-        nk_image(ctx, nk_image_handle(snk_nkhandle(state.ui.img_nearest_clamp)));
-        nk_image(ctx, nk_image_handle(snk_nkhandle(state.ui.img_linear_clamp)));
-        nk_image(ctx, nk_subimage_handle(snk_nkhandle(state.ui.img_nearest_repeat), 1, 1, region));
-        nk_image(ctx, nk_subimage_handle(snk_nkhandle(state.ui.img_linear_mirror), 1, 1, region));
+static void draw_points(void) {
+    sgp_set_color(1.0f, 1.0f, 1.0f, 1.0f);
+    sgp_irect viewport = sgp_query_state()->viewport;
+    int width = viewport.w, height = viewport.h;
+    unsigned int count = 0;
+    for(int y=64;y<height-64 && count < 4096;y+=8) {
+        for(int x=64;x<width-64 && count < 4096;x+=8) {
+            sgp_vec2 v = {(float)x,(float)y};
+            points_buffer[count++] = v;
+        }
     }
-    nk_end(ctx);
+    sgp_draw_points(points_buffer, count);
+}
 
-    // perform sokol-gfx rendering...
-    // ...first the offscreen pass which renders the sokol-gl scene
-    sg_begin_pass(state.offscreen.pass, &state.offscreen.pass_action);
-    sgl_context_draw(state.offscreen.sgl_ctx);
-    sg_end_pass();
+static void draw_lines(void) {
+    sgp_set_color(1.0f, 1.0f, 1.0f, 1.0f);
+    unsigned int count = 0;
+    sgp_irect viewport = sgp_query_state()->viewport;
+    sgp_vec2 c = {viewport.w / 2.0f, viewport.h / 2.0f};
+    points_buffer[count++] = c;
+    for(float theta = 0.0f; theta <= PI*8.0f; theta+=PI/16.0f) {
+        float r = 10.0f*theta;
+        sgp_vec2 v = {c.x + r*cosf(theta), c.y + r*sinf(theta)};
+        points_buffer[count++] = v;
+    }
+    sgp_draw_lines_strip(points_buffer, count);
+}
 
-    // then the display pass with the Dear ImGui scene
-    sg_begin_default_pass(&state.display.pass_action, sapp_width(), sapp_height());
-    snk_render(sapp_width(), sapp_height());
+static void draw_triangles(void) {
+    sgp_irect viewport = sgp_query_state()->viewport;
+    int width = viewport.w, height = viewport.h;
+    float hw = width * 0.5f;
+    float hh = height * 0.5f;
+    float w = height*0.2f;
+    float ax = hw - w, ay = hh + w;
+    float bx = hw,     by = hh - w;
+    float cx = hw + w, cy = hh + w;
+    sgp_set_color(1.0f, 0.0f, 1.0f, 1.0f);
+    sgp_push_transform();
+    sgp_translate(-w*1.5f, 0.0f);
+    sgp_draw_filled_triangle(ax, ay, bx, by, cx, cy);
+    sgp_translate(w*3.0f, 0.0f);
+    unsigned int count = 0;
+    float step = (2.0f*PI)/6.0f;
+    for(float theta = 0.0f; theta <= 2.0f*PI + step*0.5f; theta+=step) {
+        sgp_vec2 v = {hw + w*cosf(theta), hh - w*sinf(theta)};
+        points_buffer[count++] = v;
+        if(count % 3 == 1) {
+            sgp_vec2 u = {hw, hh};
+            points_buffer[count++] = u;
+        }
+    }
+    sgp_set_color(0.0f, 1.0f, 1.0f, 1.0f);
+    sgp_draw_filled_triangles_strip(points_buffer, count);
+    sgp_pop_transform();
+}
+
+static void frame(void) {
+    // begin draw commands queue
+    int width = sapp_width(), height = sapp_height();
+    sgp_begin(width, height);
+
+    int hw = width / 2;
+    int hh = height / 2;
+
+    // draw background
+    sgp_set_color(0.05f, 0.05f, 0.05f, 1.0f);
+    sgp_clear();
+    sgp_reset_color();
+
+    // top left
+    sgp_viewport(0, 0, hw, hh);
+    sgp_set_color(0.1f, 0.1f, 0.1f, 1.0f);
+    sgp_clear();
+    sgp_reset_color();
+    sgp_push_transform();
+    sgp_translate(0.0f, -hh / 4.0f);
+    draw_rects();
+    sgp_pop_transform();
+    sgp_push_transform();
+    sgp_translate(0.0f, hh / 4.0f);
+    sgp_scissor(0, 0, hw, 3.0f*hh / 4.0f);
+    draw_rects();
+    sgp_reset_scissor();
+    sgp_pop_transform();
+
+    // top right
+    sgp_viewport(hw, 0, hw, hh);
+    draw_triangles();
+
+    // bottom left
+    sgp_viewport(0, hh, hw, hh);
+    draw_points();
+
+    // bottom right
+    sgp_viewport(hw, hh, hw, hh);
+    sgp_set_color(0.1f, 0.1f, 0.1f, 1.0f);
+    sgp_clear();
+    sgp_reset_color();
+    draw_lines();
+
+    // dispatch draw commands
+    sg_pass_action pass_action = {0};
+    sg_begin_default_pass(&pass_action, width, height);
+    sgp_flush();
+    sgp_end();
     sg_end_pass();
     sg_commit();
 }
 
-static void input(const sapp_event *ev)
-{
-    snk_handle_event(ev);
+static void init(void) {
+    // initialize Sokol GFX
+    sg_desc sgdesc = {.context = sapp_sgcontext()};
+    sg_setup(&sgdesc);
+    if(!sg_isvalid()) {
+        fprintf(stderr, "Failed to create Sokol GFX context!\n");
+        exit(-1);
+    }
+
+    // initialize Sokol GP
+    sgp_desc sgpdesc = {0};
+    sgp_setup(&sgpdesc);
+    if(!sgp_is_valid()) {
+        fprintf(stderr, "Failed to create Sokol GP context: %s\n", sgp_get_error_message(sgp_get_last_error()));
+        exit(-1);
+    }
 }
 
-static void cleanup(void)
-{
-    sgl_shutdown();
-    snk_shutdown();
+static void cleanup(void) {
+    sgp_shutdown();
     sg_shutdown();
 }
 
-sapp_desc sokol_main(int argc, char *argv[])
-{
+sapp_desc sokol_main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
     return (sapp_desc){
         .init_cb = init,
         .frame_cb = frame,
         .cleanup_cb = cleanup,
-        .event_cb = input,
-        .enable_clipboard = true,
-        .width = 580,
-        .height = 600,
-        .window_title = "nuklear-image-sapp.c",
-        .icon.sokol_default = true,
-        .logger.func = slog_func,
+        .window_title = "Primitives (Sokol GP)",
+        .sample_count = 4,
     };
-}
-
-// vertex specification for a cube with colored sides and texture coords
-static void draw_cube(void)
-{
-    sgl_begin_quads();
-    sgl_c3f(1.0f, 0.0f, 0.0f);
-    sgl_v3f_t2f(-1.0f, 1.0f, -1.0f, -1.0f, 1.0f);
-    sgl_v3f_t2f(1.0f, 1.0f, -1.0f, 1.0f, 1.0f);
-    sgl_v3f_t2f(1.0f, -1.0f, -1.0f, 1.0f, -1.0f);
-    sgl_v3f_t2f(-1.0f, -1.0f, -1.0f, -1.0f, -1.0f);
-    sgl_c3f(0.0f, 1.0f, 0.0f);
-    sgl_v3f_t2f(-1.0f, -1.0f, 1.0f, -1.0f, 1.0f);
-    sgl_v3f_t2f(1.0f, -1.0f, 1.0f, 1.0f, 1.0f);
-    sgl_v3f_t2f(1.0f, 1.0f, 1.0f, 1.0f, -1.0f);
-    sgl_v3f_t2f(-1.0f, 1.0f, 1.0f, -1.0f, -1.0f);
-    sgl_c3f(0.0f, 0.0f, 1.0f);
-    sgl_v3f_t2f(-1.0f, -1.0f, 1.0f, -1.0f, 1.0f);
-    sgl_v3f_t2f(-1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
-    sgl_v3f_t2f(-1.0f, 1.0f, -1.0f, 1.0f, -1.0f);
-    sgl_v3f_t2f(-1.0f, -1.0f, -1.0f, -1.0f, -1.0f);
-    sgl_c3f(1.0f, 0.5f, 0.0f);
-    sgl_v3f_t2f(1.0f, -1.0f, 1.0f, -1.0f, 1.0f);
-    sgl_v3f_t2f(1.0f, -1.0f, -1.0f, 1.0f, 1.0f);
-    sgl_v3f_t2f(1.0f, 1.0f, -1.0f, 1.0f, -1.0f);
-    sgl_v3f_t2f(1.0f, 1.0f, 1.0f, -1.0f, -1.0f);
-    sgl_c3f(0.0f, 0.5f, 1.0f);
-    sgl_v3f_t2f(1.0f, -1.0f, -1.0f, -1.0f, 1.0f);
-    sgl_v3f_t2f(1.0f, -1.0f, 1.0f, 1.0f, 1.0f);
-    sgl_v3f_t2f(-1.0f, -1.0f, 1.0f, 1.0f, -1.0f);
-    sgl_v3f_t2f(-1.0f, -1.0f, -1.0f, -1.0f, -1.0f);
-    sgl_c3f(1.0f, 0.0f, 0.5f);
-    sgl_v3f_t2f(-1.0f, 1.0f, -1.0f, -1.0f, 1.0f);
-    sgl_v3f_t2f(-1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
-    sgl_v3f_t2f(1.0f, 1.0f, 1.0f, 1.0f, -1.0f);
-    sgl_v3f_t2f(1.0f, 1.0f, -1.0f, -1.0f, -1.0f);
-    sgl_end();
 }

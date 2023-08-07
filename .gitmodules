@@ -7,3 +7,6 @@
 [submodule "3rdparty/flecs"]
 	path = 3rdparty/flecs
 	url = https://github.com/SanderMertens/flecs.git
+[submodule "3rdparty/sokol_gp"]
+	path = 3rdparty/sokol_gp
+	url = https://github.com/edubart/sokol_gp.git
